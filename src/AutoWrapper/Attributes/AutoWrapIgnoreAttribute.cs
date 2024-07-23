@@ -1,9 +1,7 @@
-﻿using System;
+using System;
 
-namespace AutoWrapper.Attributes
-{
-    public class AutoWrapIgnoreAttribute : Attribute
-    {
-        public AutoWrapIgnoreAttribute(){}
-    }
-}
+namespace AutoWrapper.Attributes;
+
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class AutoWrapIgnoreAttribute
+    : Attribute;

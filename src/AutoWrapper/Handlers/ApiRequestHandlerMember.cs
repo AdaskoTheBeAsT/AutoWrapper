@@ -1,208 +1,271 @@
-﻿namespace AutoWrapper.Handlers
+using System;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using AutoWrapper.Constants;
+using AutoWrapper.Exceptions;
+using AutoWrapper.Models;
+using HelpMate.Core.Extensions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using static Microsoft.AspNetCore.Http.StatusCodes;
+
+namespace AutoWrapper.Handlers;
+
+internal class ApiRequestHandlerMember
 {
-    using AutoWrapper.Constants;
-    using AutoWrapper.Exceptions;
-    using AutoWrapper.Models;
-    using HelpMate.Core.Extensions;
-    using Microsoft.AspNetCore.Http;
-    using Microsoft.Extensions.Logging;
-    using System;
-    using System.IO;
-    using System.Linq;
-    using System.Text;
-    using System.Text.Json;
-    using System.Text.RegularExpressions;
-    using System.Threading.Tasks;
-    using static Microsoft.AspNetCore.Http.StatusCodes;
+    private readonly AutoWrapperOptions _options;
+    private readonly ILogger<ApiRequestHandlerMember> _logger;
+    private readonly JsonSerializerOptions _jsonOptions;
 
-    internal class ApiRequestHandlerMember
+    public ApiRequestHandlerMember(
+        AutoWrapperOptions options,
+        ILoggerFactory loggerFactory,
+        JsonSerializerOptions jsonOptions)
     {
-        private readonly AutoWrapperOptions _options;
-        private readonly ILogger<AutoWrapperMiddleware> _logger;
-        private readonly JsonSerializerOptions _jsonOptions;
+        _options = options;
+        _logger = loggerFactory.CreateLogger<ApiRequestHandlerMember>();
+        _jsonOptions = jsonOptions;
+    }
 
-        public ApiRequestHandlerMember(AutoWrapperOptions options,
-                            ILogger<AutoWrapperMiddleware> logger,
-                            JsonSerializerOptions jsonOptions)
+    protected static bool IsDefaultSwaggerPath(HttpContext context)
+        => context.Request.Path.StartsWithSegments(new PathString("/swagger"), StringComparison.OrdinalIgnoreCase);
+
+    protected static bool IsPathMatched(
+        HttpContext context,
+        string path)
+    {
+        var regExclue = new Regex(path, RegexOptions.None, TimeSpan.FromSeconds(1));
+        return regExclue.IsMatch(context.Request.Path.Value!);
+    }
+
+    protected static async Task WriteFormattedResponseToHttpContextAsync(
+        HttpContext context,
+        int httpStatusCode,
+        string jsonString,
+        JsonDocument? jsonDocument = null)
+    {
+        context.Response.StatusCode = httpStatusCode;
+        context.Response.ContentType = ContentMediaTypes.JSONHttpContentMediaType;
+        context.Response.ContentLength = jsonString != null ? Encoding.UTF8.GetByteCount(jsonString!) : 0;
+
+#pragma warning disable IDISP007
+        jsonDocument?.Dispose();
+#pragma warning restore IDISP007
+
+        await context.Response.WriteAsync(jsonString!)
+            .ConfigureAwait(continueOnCapturedContext: false);
+    }
+
+    protected static ApiErrorResponse WrapErrorResponse(
+        int statusCode,
+        string? message = null) =>
+        statusCode switch
         {
-            _options = options;
-            _logger = logger;
-            _jsonOptions = jsonOptions;
+            Status204NoContent => new ApiErrorResponse(
+                message ?? ResponseMessage.NoContent,
+                nameof(ResponseMessage.NoContent)),
+            Status400BadRequest => new ApiErrorResponse(
+                message ?? ResponseMessage.BadRequest,
+                nameof(ResponseMessage.BadRequest)),
+            Status401Unauthorized => new ApiErrorResponse(
+                message ?? ResponseMessage.UnAuthorized,
+                nameof(ResponseMessage.UnAuthorized)),
+            Status404NotFound => new ApiErrorResponse(
+                message ?? ResponseMessage.NotFound,
+                nameof(ResponseMessage.NotFound)),
+            Status405MethodNotAllowed => new ApiErrorResponse(
+                ResponseMessage.MethodNotAllowed,
+                nameof(ResponseMessage.MethodNotAllowed)),
+            Status415UnsupportedMediaType => new ApiErrorResponse(
+                ResponseMessage.MediaTypeNotSupported,
+                nameof(ResponseMessage.MediaTypeNotSupported)),
+            _ => new ApiErrorResponse(ResponseMessage.Unknown, nameof(ResponseMessage.Unknown)),
+        };
+
+    protected static ApiResponse WrapSuccessfulResponse(
+        ApiResponse apiResponse,
+        string httpMethod)
+    {
+        apiResponse.Message ??= $"{httpMethod} {ResponseMessage.Success}";
+        return apiResponse;
+    }
+
+    protected static (bool IsValidated, object ValidatedValue) ValidateSingleValueType(object value)
+    {
+        var result = value.ToString() ?? string.Empty;
+        if (result.IsWholeNumber())
+        {
+            return (true, result.ToInt64());
         }
 
-        protected static bool IsDefaultSwaggerPath(HttpContext context)
-            => context.Request.Path.StartsWithSegments(new PathString("/swagger"));
-
-        protected static bool IsPathMatched(HttpContext context, string path)
+        if (result.IsDecimalNumber())
         {
-            Regex regExclue = new Regex(path);
-            return regExclue.IsMatch(context.Request.Path.Value!);
+            return (true, result.ToDecimal());
         }
 
-        protected bool IsApiRoute(HttpContext context)
+        if (result.IsBoolean())
         {
-            var fileTypes = new[] { ".js", ".html", ".css" };
-
-            if (_options.IsApiOnly && !fileTypes.Any(context.Request.Path.Value!.Contains))
-            {
-                return true;
-            }
-
-            return context.Request.Path.StartsWithSegments(new PathString(_options.WrapWhenApiPathStartsWith));
+            return (true, result.ToBoolean());
         }
 
-        protected static async Task WriteFormattedResponseToHttpContextAsync(HttpContext context, int httpStatusCode, string jsonString, JsonDocument? jsonDocument = null)
+        if (result.Contains('"', StringComparison.OrdinalIgnoreCase))
         {
-            context.Response.StatusCode = httpStatusCode;
-            context.Response.ContentType = ContentMediaTypes.JSONHttpContentMediaType;
-            context.Response.ContentLength = jsonString != null ? Encoding.UTF8.GetByteCount(jsonString!) : 0;
-
-            if (jsonDocument is not null)
-            {
-                jsonDocument.Dispose();
-            }
-
-            await context.Response.WriteAsync(jsonString!);
+            return (true, result.Replace("\"", string.Empty, StringComparison.OrdinalIgnoreCase));
         }
 
-        protected static ApiErrorResponse WrapErrorResponse(int statusCode, string? message = null) =>
-            statusCode switch
-            {
-                Status204NoContent => new ApiErrorResponse(message ?? ResponseMessage.NoContent, nameof(ResponseMessage.NoContent)),
-                Status400BadRequest => new ApiErrorResponse(message ?? ResponseMessage.BadRequest, nameof(ResponseMessage.BadRequest)),
-                Status401Unauthorized => new ApiErrorResponse(message ?? ResponseMessage.UnAuthorized, nameof(ResponseMessage.UnAuthorized)),
-                Status404NotFound => new ApiErrorResponse(message ?? ResponseMessage.NotFound, nameof(ResponseMessage.NotFound)),
-                Status405MethodNotAllowed => new ApiErrorResponse(ResponseMessage.MethodNotAllowed, nameof(ResponseMessage.MethodNotAllowed)),
-                Status415UnsupportedMediaType => new ApiErrorResponse(ResponseMessage.MediaTypeNotSupported, nameof(ResponseMessage.MediaTypeNotSupported)),
-                _ => new ApiErrorResponse(ResponseMessage.Unknown, nameof(ResponseMessage.Unknown))
-            };
+        return (false, value!);
+    }
 
-        protected void LogExceptionWhenEnabled(Exception exception, string message, int statusCode)
+    protected bool IsApiRoute(HttpContext context)
+    {
+        var fileTypes = new[] { ".js", ".html", ".css" };
+
+        if (_options.IsApiOnly && !Array.Exists(fileTypes, s => context.Request.Path.Value!.Contains(s, StringComparison.OrdinalIgnoreCase)))
         {
-            if (_options.EnableExceptionLogging)
-            {
-                _logger.Log(LogLevel.Error, exception!, $"[{statusCode}]: { message }");
-            }
+            return true;
         }
 
-        protected async Task HandleApiExceptionAsync(HttpContext context, Exception exception)
+        return context.Request.Path.StartsWithSegments(new PathString(_options.WrapWhenApiPathStartsWith), StringComparison.OrdinalIgnoreCase);
+    }
+
+    protected void LogExceptionWhenEnabled(
+        Exception exception,
+        string message,
+        int statusCode)
+    {
+        if (_options.EnableExceptionLogging)
         {
-            var ex = exception as ApiException;
+            _logger.Log(LogLevel.Error, exception!, "[{StatusCode}]: {Message}", statusCode, message);
+        }
+    }
 
-            if (ex?.ValidationErrors is not null)
-            {
-                await HandleValidationErrorAsync(context, ex);
-                return;
-            }
+    protected async Task HandleApiExceptionAsync(
+        HttpContext context,
+        Exception exception)
+    {
+        var ex = exception as ApiException;
 
-            if (ex?.CustomErrorModel is not null)
-            {
-                await HandleCustomErrorAsync(context, ex);
-                return;
-            }
-
-            await HandleApiErrorAsync(context, ex!);
+        if (ex?.ValidationErrors is not null)
+        {
+            await HandleValidationErrorAsync(context, ex)
+                .ConfigureAwait(continueOnCapturedContext: false);
+            return;
         }
 
-        protected async Task HandleUnAuthorizedErrorAsync(HttpContext context, Exception ex)
+        if (ex?.CustomErrorModel is not null)
         {
-            var response = new ApiErrorResponse(ResponseMessage.UnAuthorized);
-
-            LogExceptionWhenEnabled(ex, ex.Message, Status401Unauthorized);
-
-            var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
-
-            await WriteFormattedResponseToHttpContextAsync(context!, Status401Unauthorized, jsonString!);
+            await HandleCustomErrorAsync(context, ex)
+                .ConfigureAwait(continueOnCapturedContext: false);
+            return;
         }
 
-        protected async Task HandleDefaultErrorAsync(HttpContext context, Exception ex)
+        await HandleApiErrorAsync(context, ex!)
+            .ConfigureAwait(continueOnCapturedContext: false);
+    }
+
+    protected async Task HandleUnAuthorizedErrorAsync(
+        HttpContext context,
+        Exception ex)
+    {
+        var response = new ApiErrorResponse(ResponseMessage.UnAuthorized);
+
+        LogExceptionWhenEnabled(ex, ex.Message, Status401Unauthorized);
+
+        var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
+
+        await WriteFormattedResponseToHttpContextAsync(context!, Status401Unauthorized, jsonString!)
+            .ConfigureAwait(continueOnCapturedContext: false);
+    }
+
+    protected async Task HandleDefaultErrorAsync(
+        HttpContext context,
+        Exception ex)
+    {
+        string? details = null;
+        string message;
+
+        if (_options.IsDebug)
         {
-            string? details = null;
-            string message;
-
-            if (_options.IsDebug)
-            {
-                message = ex.GetBaseException().Message;
-                details = ex.StackTrace;
-            }
-            else
-            {
-                message = ResponseMessage.Unhandled;
-            }
-
-            var response = new ApiErrorResponse(message, ex.GetType().Name, details);
-
-            LogExceptionWhenEnabled(ex, ex.Message, Status500InternalServerError);
-
-            var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
-
-            await WriteFormattedResponseToHttpContextAsync(context!, Status500InternalServerError, jsonString!);
+            message = ex.GetBaseException().Message;
+            details = ex.StackTrace;
+        }
+        else
+        {
+            message = ResponseMessage.Unhandled;
         }
 
-        protected string ConvertToJSONString(int httpStatusCode, object content, string httpMethod)
-        {
-            var result = content.ToString() ?? string.Empty;
-            var statusCode = (!_options.ShowStatusCode) ? null : (int?)httpStatusCode;
-            var apiResponse = new ApiResponse($"{httpMethod} {ResponseMessage.Success}", content, statusCode);
+        var response = new ApiErrorResponse(message, ex.GetType().Name, details);
 
-            var serialized =  JsonSerializer.Serialize(apiResponse, _jsonOptions!);
+        LogExceptionWhenEnabled(ex, ex.Message, Status500InternalServerError);
 
-            return result.IsHtml() ? Regex.Unescape(serialized) : serialized;  
-        }
+        var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
 
-        protected string ConvertToJSONString(ApiResponse apiResponse)
-            => JsonSerializer.Serialize(apiResponse!, _jsonOptions!);
+        await WriteFormattedResponseToHttpContextAsync(context!, Status500InternalServerError, jsonString!)
+            .ConfigureAwait(continueOnCapturedContext: false);
+    }
 
-        protected string ConvertToJSONString(object rawJSON) => JsonSerializer.Serialize(rawJSON!, _jsonOptions!);
+    protected string ConvertToJSONString(
+        int httpStatusCode,
+        object content,
+        string httpMethod)
+    {
+        var result = content.ToString() ?? string.Empty;
+        var statusCode = (!_options.ShowStatusCode) ? null : (int?)httpStatusCode;
+        var apiResponse = new ApiResponse($"{httpMethod} {ResponseMessage.Success}", content, statusCode);
 
-        protected static ApiResponse WrapSucessfulResponse(ApiResponse apiResponse, string httpMethod)
-        {
-            apiResponse.Message ??= $"{httpMethod} {ResponseMessage.Success}";
-            return apiResponse;
-        }
+        var serialized = JsonSerializer.Serialize(apiResponse, _jsonOptions!);
 
-        protected static (bool IsValidated, object ValidatedValue) ValidateSingleValueType(object value)
-        {
-            var result = value.ToString() ?? string.Empty;
-            if (result.IsWholeNumber()) { return (true, result.ToInt64()); }
-            if (result.IsDecimalNumber()) { return (true, result.ToDecimal()); }
-            if (result.IsBoolean()) { return (true, result.ToBoolean()); }
-            if (result.Contains("\"")) { return (true, result.Replace("\"", "")); }
+        return result.IsHtml() ? Regex.Unescape(serialized) : serialized;
+    }
 
-            return (false, value!);
-        }
+    protected string ConvertToJSONString(ApiResponse apiResponse)
+        => JsonSerializer.Serialize(apiResponse!, _jsonOptions!);
 
-        private async Task HandleValidationErrorAsync(HttpContext context, ApiException ex)
-        {
-            var response = new ApiErrorResponse(ex.ValidationErrors!);
+    protected string ConvertToJSONString(object rawJSON) => JsonSerializer.Serialize(rawJSON!, _jsonOptions!);
 
-            LogExceptionWhenEnabled(ex, ex.Message, ex.StatusCode);
+    private async Task HandleValidationErrorAsync(
+        HttpContext context,
+        ApiException ex)
+    {
+        var response = new ApiErrorResponse(ex.ValidationErrors!);
 
-            var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
+        LogExceptionWhenEnabled(ex, ex.Message, ex.StatusCode);
 
-            await WriteFormattedResponseToHttpContextAsync(context!, ex.StatusCode, jsonString!);
-        }
+        var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
 
-        private async Task HandleCustomErrorAsync(HttpContext context, ApiException ex)
-        {
-            var response = new ApiErrorResponse(ex.CustomErrorModel!);
+        await WriteFormattedResponseToHttpContextAsync(context!, ex.StatusCode, jsonString!)
+            .ConfigureAwait(continueOnCapturedContext: false);
+    }
 
-            LogExceptionWhenEnabled(ex, ex.Message, ex.StatusCode);
+    private async Task HandleCustomErrorAsync(
+        HttpContext context,
+        ApiException ex)
+    {
+        var response = new ApiErrorResponse(ex.CustomErrorModel!);
 
-            var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
+        LogExceptionWhenEnabled(ex, ex.Message, ex.StatusCode);
 
-            await WriteFormattedResponseToHttpContextAsync(context!, ex.StatusCode, jsonString!);
-        }
+        var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
 
-        private async Task HandleApiErrorAsync(HttpContext context, ApiException ex)
-        {
-            var response = new ApiErrorResponse(ex.Message, ex.ErrorCode ?? ex.GetType().Name);
+        await WriteFormattedResponseToHttpContextAsync(context!, ex.StatusCode, jsonString!)
+            .ConfigureAwait(continueOnCapturedContext: false);
+    }
 
-            LogExceptionWhenEnabled(ex, ex.Message, ex.StatusCode);
+    private async Task HandleApiErrorAsync(
+        HttpContext context,
+        ApiException ex)
+    {
+        var response = new ApiErrorResponse(ex.Message, ex.ErrorCode ?? ex.GetType().Name);
 
-            var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
+        LogExceptionWhenEnabled(ex, ex.Message, ex.StatusCode);
 
-            await WriteFormattedResponseToHttpContextAsync(context!, ex.StatusCode, jsonString!);
-        }
+        var jsonString = JsonSerializer.Serialize(response, _jsonOptions!);
+
+        await WriteFormattedResponseToHttpContextAsync(context!, ex.StatusCode, jsonString!)
+            .ConfigureAwait(continueOnCapturedContext: false);
     }
 }

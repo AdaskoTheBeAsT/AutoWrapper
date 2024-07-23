@@ -1,7 +1,6 @@
-﻿namespace AutoWrapper.Tests.Models
+namespace AutoWrapper.Tests.Models;
+
+public class MapResponseObject
 {
-    public class MapResponseObject
-    {
-        public object Data { get; set; }
-    }
+    public object? Data { get; set; }
 }

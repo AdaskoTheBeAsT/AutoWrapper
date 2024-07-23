@@ -1,6 +1,3 @@
-﻿namespace AutoWrapper.Interfaces
-{
-    public interface IApiError
-    {
-    }
-}
+namespace AutoWrapper.Interfaces;
+
+public interface IApiError;

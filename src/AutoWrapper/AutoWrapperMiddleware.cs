@@ -1,32 +1,34 @@
-﻿namespace AutoWrapper
+using System.Threading.Tasks;
+using AutoWrapper.Base;
+using AutoWrapper.Handlers;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.Extensions.Logging;
+
+namespace AutoWrapper;
+
+internal class AutoWrapperMiddleware
+    : AutoWrapperBase
 {
-    using AutoWrapper.Base;
-    using AutoWrapper.Handlers;
-    using Microsoft.AspNetCore.Http;
-    using Microsoft.AspNetCore.Mvc;
-    using Microsoft.AspNetCore.Mvc.Infrastructure;
-    using Microsoft.Extensions.Logging;
-    using System.Threading.Tasks;
+    private readonly ApiRequestHandler _handler;
 
-    internal class AutoWrapperMiddleware : AutoWrapperBase
+    public AutoWrapperMiddleware(
+        RequestDelegate next,
+        AutoWrapperOptions options,
+        ILoggerFactory loggerFactory,
+        IActionResultExecutor<ObjectResult> executor)
+        : base(next, options, loggerFactory, executor)
     {
-        private readonly ApiRequestHandler _handler;
-        public AutoWrapperMiddleware(RequestDelegate next, 
-                                     AutoWrapperOptions options, 
-                                     ILogger<AutoWrapperMiddleware> logger, 
-                                     IActionResultExecutor<ObjectResult> executor) 
-        : base(next, options, logger, executor)
-        {
-            var jsonOptions = Configurations
-                .JsonSettingsConfiguration
-                .GetJsonSerializerOptions(options.JsonNamingPolicy, options.IgnoreNullValue);
+        var jsonOptions = Configurations
+            .JsonSettingsConfiguration
+            .GetJsonSerializerOptions(options.JsonNamingPolicy, options.DefaultIgnoreCondition);
 
-            _handler = new ApiRequestHandler(options, logger, jsonOptions);
-        }
+        _handler = new ApiRequestHandler(options, loggerFactory, jsonOptions);
+    }
 
-        public async Task InvokeAsync(HttpContext context)
-        {
-            await InvokeAsyncBase(context, _handler);
-        }
+    public async Task InvokeAsync(HttpContext context)
+    {
+        await InvokeBaseAsync(context, _handler).ConfigureAwait(continueOnCapturedContext: false);
     }
 }

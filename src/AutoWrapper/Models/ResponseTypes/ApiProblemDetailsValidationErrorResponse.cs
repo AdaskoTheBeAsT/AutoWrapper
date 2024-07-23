@@ -1,11 +1,12 @@
-﻿namespace AutoWrapper.Models.ResponseTypes
-{
-    using Microsoft.AspNetCore.Mvc;
-    using System.Collections.Generic;
+using System.Collections.Generic;
+using Microsoft.AspNetCore.Mvc;
 
-    public class ApiProblemDetailsValidationErrorResponse: ProblemDetails
-    {
-        public bool IsError { get; set; }
-        public IEnumerable<ValidationError>? ValidationErrors { get; set; }
-    }
+namespace AutoWrapper.Models.ResponseTypes;
+
+public class ApiProblemDetailsValidationErrorResponse
+    : ProblemDetails
+{
+    public bool IsError { get; set; }
+
+    public IEnumerable<ValidationError>? ValidationErrors { get; set; }
 }

@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 
-namespace AutoWrapper.Attributes
-{
-    public class RequestDataLogIgnoreAttribute: Attribute {}
-}
+namespace AutoWrapper.Attributes;
+
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class RequestDataLogIgnoreAttribute
+    : Attribute;

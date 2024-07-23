@@ -1,9 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 
-namespace AutoWrapper.Models.ResponseTypes
+namespace AutoWrapper.Models.ResponseTypes;
+
+public class ApiProblemDetailsResponse
+    : ProblemDetails
 {
-    public class ApiProblemDetailsResponse: ProblemDetails
-    {
-        public bool IsError { get; set; }
-    }
+    public bool IsError { get; set; }
 }

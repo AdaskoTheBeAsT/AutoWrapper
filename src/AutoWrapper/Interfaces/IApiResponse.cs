@@ -1,6 +1,3 @@
-﻿namespace AutoWrapper.Interface
-{
-    public interface IApiResponse
-    {
-    }
-}
+namespace AutoWrapper.Interface;
+
+public interface IApiResponse;
